@@ -14,7 +14,49 @@ The modules are divided as follows:
  - `OUNoise.py` contains the Ornstein–Uhlenbeck process noise generation class
  - `main.py` is the local version of the main code that can be used locally (without the Jupyter Notebook)
  
+The overall Multi-Agent DDPG approach follows the proposed approach from _[Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments](https://arxiv.org/abs/1706.02275)_. Basically, each of the two agents optimize their online critics and then use the critic direct output to perform gradient descent in the inverse direction of the critic's output.
+![MADDPG](img/maddpg.png)
+The training pseudo-code can be summarized as:
 
+  for each agent:
+    both agents target actors computes next_action
+    curernt agent target critic generates next q-value
+    using current agent reward compute TD-error
+    optimize current agent critic
+    compute next action for all actors 
+    compute q-value with current agent critic (using all actions and states)
+    minimize q-value return wrt current agent actor parameters
+  slowly transfer weights from online to target graphs
+
+In order to find optimal solution we performed multi-step grid-search. The first grid-search dictionary has been defined with the following self-explanatory parameters:
+
+```
+  dct_grid = {
+      "actor_layers" : [ 
+              [128, 128],
+            ],
+      "critic_state_layers" : [
+            [128],
+          ],
+      "critic_final_layers" : [
+            [128],
+          ],
+      "actor_input_bn" : [True, False],
+      "actor_hidden_bn" : [True, False],
+      "critic_state_bn" : [True, False],
+      "critic_final_bn" : [True, False],
+      "apply_post_bn"   : [True, False],
+      "noise_scaling_factor" : [2, 1],
+      }
+```
+Following this initial grid-search the best results have been obtained for `actor_hidden_bn=True` (apply batch-norm after each hidden layer in actor graphs), `apply_post_bn=False` (apply batch-norm before the non-linearity), `noise_scaling_factor=2` (start from a scaling factor of 2 for the Ornstein–Uhlenbeck noise generation and slowly decrease up to a 0.5x noise)
+
+  {'actor_input_bn': True,  'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 2}
+  {'actor_input_bn': True, ' actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': True,  'noise_scaling_factor': 2}
+  {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': False, 'noise_scaling_factor': 2}
+  {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': False, 'noise_scaling_factor': 2}
+  {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 1}
+  {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 2} 
 
 
 ## Future improvements

@@ -30,7 +30,9 @@ def init_layers(layers, init_custom):
 class MADDPGActor(nn.Module):
   def __init__(self, input_size, output_size, 
                layers=[256, 128], # 256 128
-               init_custom=True, use_pre_bn=False, use_post_bn=False):
+               init_custom=True, use_input_bn=False, use_hidden_bn=False,
+               bn_post=False,
+               model_name='actor'):
     """
     The configurable Actor module
     layers: configurable stream of layers - allways outputs a tanh
@@ -39,19 +41,22 @@ class MADDPGActor(nn.Module):
     super(MADDPGActor, self).__init__()
     self.layers = nn.ModuleList()
     self.init_custom = init_custom
+    self.model_name = model_name
     pre_units = input_size
-    if use_pre_bn:
+    if use_input_bn:
       self.layers.append(nn.BatchNorm1d(pre_units))
     
     for i,L in enumerate(layers):
       if i == 0:
-          use_bias = not use_pre_bn
+          use_bias = not use_input_bn
       else:
           use_bias = True
       self.layers.append(nn.Linear(pre_units, L, bias=use_bias))
-      if use_post_bn:
+      if use_hidden_bn and not bn_post:
           self.layers.append(nn.BatchNorm1d(L))
       self.layers.append(nn.ReLU())
+      if use_hidden_bn and bn_post:
+          self.layers.append(nn.BatchNorm1d(L))
       pre_units = L
     self.final_linear = nn.Linear(pre_units, output_size)
     self.final_activation = nn.Tanh()
@@ -80,8 +85,10 @@ class MADDPGCritic(nn.Module):
                state_layers=[256],  # 256
                final_layers=[256, 128], # 256 128
                state_bn=True,
+               bn_post=False,
                act_bn=False,
                other_bn=False,
+               model_name='critic'
                ):
     """
     The Critic module can be easily configured to almost any number of layers. It currently support three main
@@ -94,6 +101,7 @@ class MADDPGCritic(nn.Module):
     """
     super(MADDPGCritic, self).__init__()
     self.init_custom = init_custom
+    self.model_name = model_name
     
     self.final_layers = nn.ModuleList()
 
@@ -102,12 +110,14 @@ class MADDPGCritic(nn.Module):
         self.state_layers = nn.ModuleList()
         for L in state_layers:
             self.state_layers.append(nn.Linear(pre_units, L))
-            if state_bn:
+            if state_bn and not bn_post:
                 self.state_layers.append(nn.BatchNorm1d(L))
             if leaky:
                 self.state_layers.append(nn.LeakyReLU())
             else:
                 self.state_layers.append(nn.ReLU())
+            if state_bn and bn_post:
+                self.state_layers.append(nn.BatchNorm1d(L))
             pre_units = L
     final_state_column_size = pre_units
 
@@ -116,24 +126,28 @@ class MADDPGCritic(nn.Module):
         self.act_layers = nn.ModuleList()
         for L in act_layers:
             self.act_layers.append(nn.Linear(pre_units, L))
-            if act_bn:
+            if act_bn and not bn_post:
                 self.act_layers.append(nn.BatchNorm1d(L))                    
             if leaky:
                 self.act_layers.append(nn.LeakyReLU())
             else:
                 self.act_layers.append(nn.ReLU())
+            if act_bn and bn_post:
+                self.act_layers.append(nn.BatchNorm1d(L))                    
             pre_units = L
     final_action_column_size = pre_units
         
     pre_units = final_state_column_size + final_action_column_size
     for L in final_layers:
         self.final_layers.append(nn.Linear(pre_units, L))
-        if other_bn:
+        if other_bn and not bn_post:
             self.final_layers.append(nn.BatchNorm1d(L))                    
         if leaky:
             self.final_layers.append(nn.LeakyReLU())
         else:
             self.final_layers.append(nn.ReLU())
+        if other_bn and bn_post:
+            self.final_layers.append(nn.BatchNorm1d(L))                    
         pre_units = L        
         
     self.final_linear = nn.Linear(pre_units, output_size)
@@ -178,9 +192,29 @@ class MADDPGCritic(nn.Module):
     
 
 def layers_stats(model):
-  print("Model {} min/max/mean/median:".format(model.__class__.__name__))
+  VANISH_THR = 1e-9
+  VANISH_NR = 3
+  vanished = 0
+  msg = ""
   for name, param in model.named_parameters():
       data = param.detach().cpu().numpy()
-      print("  {:<25}  {:>8.1e} / {:>8.1e} / {:>8.1e} / {:>8.1e} {}...".format(
-          name+":", data.min(), data.max(), data.mean(), np.median(data), data.ravel()[:2]))
+      grads = param.grad.detach().cpu().numpy()
+      status_grad = ""
+      if (grads.max() > -VANISH_THR) and (grads.max() < VANISH_THR):
+        status_grad = 'VANISH'
+      if (grads.min() < -1) or (grads.min() > 1):
+        status_grad = 'EXPLODE'
+      if status_grad != '':
+        vanished += 1
+        msg += "  {:<25} {:<7} {:>8.1e} / {:>8.1e} / {:>8.1e} / {:>8.1e} {}...\n".format(
+            name+":", "", data.min(), data.max(), data.mean(), np.median(data), data.ravel()[:2])
+        msg += "  {:<25} {:<7} {:>8.1e} / {:>8.1e} / {:>8.1e} / {:>8.1e} {}...\n".format(
+            "    grads:", status_grad, grads.min(), grads.max(), grads.mean(), np.median(grads), grads.ravel()[:2])
+      if vanished >= VANISH_NR:
+        print("")
+        print("Model {} min/max/mean/median:".format(model.model_name))
+        print(msg)
+        return True
+  return False
+      
       

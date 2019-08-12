@@ -9,18 +9,29 @@ import numpy as np
 
 from agent import DDPGAgent
 from ma_per import MASimpleReplayBuffer
+from brain import layers_stats
 
 class MADDPGEngine():
   def __init__(self, action_size, state_size, n_agents, 
                GAMMA=0.99,
                MEMORY_SIZE=int(1e5),
-               BATCH_SIZE=int(1e3),
-               WARMP_UP=int(1e4),
-               TAU=0.02,
+               BATCH_SIZE=256,
+               WARMP_UP=512,
+               TAU=5e-3,
+               actor_layers=[256,128],
+               actor_input_bn=True,
+               actor_hidden_bn=False,
+               critic_state_layers=[256],
+               critic_final_layers=[256, 128],
+               critic_state_bn=True,
+               critic_final_bn=False,
+               apply_post_bn=False,
                noise_scaling_factor=2.,
                noise_scaling_factor_dec=0.9999,
+               DEBUG=False,
                dev=None):
     self.__name__ = 'MADDPG'
+    self.DEBUG = DEBUG
     self.n_agents = n_agents
     self.action_size = action_size
     self.GAMMA = GAMMA
@@ -28,6 +39,7 @@ class MADDPGEngine():
     self.BATCH_SIZE = BATCH_SIZE
     self.WARM_UP = WARMP_UP
     self.state_size = state_size
+    self.current_episode = 0
     if dev is None:
       dev = th.device("cuda:0" if th.cuda.is_available() else "cpu")
     self.dev = dev
@@ -43,7 +55,18 @@ class MADDPGEngine():
                                    s_size=self.state_size,
                                    dev=self.dev, 
                                    n_agents=self.n_agents,
-                                   TAU=self.TAU))
+                                   TAU=self.TAU,
+                                   bn_post=apply_post_bn,
+                                   actor_layers=actor_layers,
+                                   actor_input_bn=actor_input_bn,
+                                   actor_hidden_bn=actor_hidden_bn,
+                                   critic_state_bn=critic_state_bn,
+                                   critic_final_bn=critic_final_bn,
+                                   critic_final_layers=critic_final_layers,
+                                   critic_state_layers=critic_state_layers,
+                                   name='Agent_{}'.format(i+1)))
+      
+    self.agents[0].show_architecture()
     
     self.noise_scaling_factor = noise_scaling_factor
     self.noise_scaling_factor_dec = noise_scaling_factor_dec
@@ -89,6 +112,7 @@ class MADDPGEngine():
       n_samples = self.BATCH_SIZE
     # get n_samples from memory
     samples = self.memory.sample(n_samples)
+    _states, _actions, _rewards, _next_states, _dones = samples
     # prpare tensors for each agent
     all_exp = [x.transpose(0,1) for x in samples]
 
@@ -128,7 +152,10 @@ class MADDPGEngine():
     th_all_states = th.cat(all_states, dim=1)
     
     
-    # now are ca compute for our agent the actual Q value
+    # now we are computing the actual Q value of our current agent
+    # the critic receives all state and all actions
+    # but only the reward of our current agent so the critic analyzes only the 
+    # current revenue stream and generates the current agent Q value
     with th.no_grad():
       th_Q_target = curr_agent.critic_target(state=th_all_next_states,
                                              action=th_all_next_actions)
@@ -145,7 +172,12 @@ class MADDPGEngine():
     th_critic_loss = loss_fn(th_q_value, th_y)
     th_critic_loss = th_critic_loss.mean()
     th_critic_loss.backward()
+    if self.DEBUG:
+      if layers_stats(curr_agent.critic):
+        print(self.current_episode)
+    th.nn.utils.clip_grad_norm_(curr_agent.critic.parameters(), 1)
     curr_agent.critic_optimizer.step()
+    curr_agent.critic_optimizer.zero_grad()
     
     
     # now we prepare the input for actor optimization
@@ -162,9 +194,27 @@ class MADDPGEngine():
     th_actor_loss = -curr_agent.critic(state=th_all_states, action=th_actors_actions)
     th_actor_loss = th_actor_loss.mean()
     th_actor_loss.backward()
+    if self.DEBUG:
+      if layers_stats(curr_agent.actor):
+        print(self.current_episode)
+    th.nn.utils.clip_grad_norm_(curr_agent.actor.parameters(), 1)
     curr_agent.actor_optimizer.step()
-    
+    curr_agent.actor_optimizer.zero_grad()    
     return
+  
+  
+  def maybe_sample(self, n_samples):
+    # check if we have any good samples
+    rewards = [x.reward for x in self.memory.memory]
+    if max(rewards) <=0:
+      return None
+    done = False
+    while not done:
+      samples = self.memory.sample(n_samples)
+      _, _ , th_rewards, _, _ = samples
+      if th_rewards.max() > 0:
+        break
+    return samples
   
   
   def update_targets(self):
