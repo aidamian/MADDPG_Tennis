@@ -17,7 +17,7 @@ The modules are divided as follows:
 The overall Multi-Agent DDPG approach follows the proposed approach from _[Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments](https://arxiv.org/abs/1706.02275)_. Basically, each of the two agents optimize their online critics and then use the critic direct output to perform gradient descent in the inverse direction of the critic's output.
 ![MADDPG](img/maddpg.png)
 The training pseudo-code can be summarized as:
-
+```
   for each agent:
     both agents target actors computes next_action
     curernt agent target critic generates next q-value
@@ -26,7 +26,9 @@ The training pseudo-code can be summarized as:
     compute next action for all actors 
     compute q-value with current agent critic (using all actions and states)
     minimize q-value return wrt current agent actor parameters
-  slowly transfer weights from online to target graphs
+  for each agent:
+    slowly transfer weights from online to target graphs
+```
 
 In order to find optimal solution we performed multi-step grid-search. The first grid-search dictionary has been defined with the following self-explanatory parameters:
 
