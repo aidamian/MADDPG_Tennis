@@ -113,7 +113,7 @@ Following a no-training-warming-up of 4096 steps the training procedure is calle
 The training could have been accelerated with a smart-sampling of the replay buffer that would drop buffers with extreme sparse results as well as increasing number of sampling-trainings per step from 1 to 2-3.
 The final results for 1000 episodes is below:
 
-![FinalResults][img/MADDPG1_T1_v1.png]
+![FinalResults](img/MADDPG1_T1_v1.png)
 
 Also, we have below the training history where we can observe for each 100 episodes the following indicators: final score of the 100x series of episodes, the 100-running average score, the 100-running max, overall max score, the loaded buffer size, number of training updates, the noise scaling factors `nsf` and the 100-running mean steps per episode
 ```
