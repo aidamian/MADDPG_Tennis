@@ -14,9 +14,9 @@ from brain import layers_stats
 class MADDPGEngine():
   def __init__(self, action_size, state_size, n_agents, 
                GAMMA=0.99,
-               MEMORY_SIZE=int(1e5),
+               MEMORY_SIZE=int(5e4),
                BATCH_SIZE=256,
-               WARMP_UP=512,
+               WARMP_UP=4096,
                TAU=5e-3,
                actor_layers=[256,128],
                actor_input_bn=True,
@@ -27,8 +27,10 @@ class MADDPGEngine():
                critic_final_bn=False,
                apply_post_bn=False,
                noise_scaling_factor=2.,
-               noise_scaling_factor_dec=0.9999,
+               noise_scaling_factor_dec=0.9995,
                DEBUG=False,
+               OUNoise=True,
+               activation='relu',
                dev=None):
     self.__name__ = 'MADDPG'
     self.DEBUG = DEBUG
@@ -64,6 +66,8 @@ class MADDPGEngine():
                                    critic_final_bn=critic_final_bn,
                                    critic_final_layers=critic_final_layers,
                                    critic_state_layers=critic_state_layers,
+                                   OUnoise=OUNoise,
+                                   activation=activation,
                                    name='Agent_{}'.format(i+1)))
       
     self.agents[0].show_architecture()
@@ -82,9 +86,6 @@ class MADDPGEngine():
         actions[i_agent] = self.agents[i_agent].act(states[i_agent], noise_scale=nsf)
       else:
         actions[i_agent] = self.agents[i_agent].act(states[i_agent], noise_scale=0.)
-    if add_noise:
-      self.noise_scaling_factor = self.noise_scaling_factor * self.noise_scaling_factor_dec
-      self.noise_scaling_factor = max(0.5, self.noise_scaling_factor)        
     return actions
   
   
@@ -103,6 +104,9 @@ class MADDPGEngine():
     for i_agent in range(self.n_agents):
       self._train(i_agent, n_samples=n_samples)
     self.update_targets()
+
+    self.noise_scaling_factor = self.noise_scaling_factor * self.noise_scaling_factor_dec
+    self.noise_scaling_factor = max(0.5, self.noise_scaling_factor)        
     return
   
   def _train(self, agent_no, n_samples=None):

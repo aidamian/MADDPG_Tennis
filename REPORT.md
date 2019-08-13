@@ -29,6 +29,7 @@ The training pseudo-code can be summarized as:
   for each agent:
     slowly transfer weights from online to target graphs
 ```
+### The grid-search
 
 In order to find optimal solution we performed multi-step grid-search. The first grid-search dictionary has been defined with the following self-explanatory parameters:
 
@@ -51,14 +52,40 @@ In order to find optimal solution we performed multi-step grid-search. The first
       "noise_scaling_factor" : [2, 1],
       }
 ```
-Following this initial grid-search the best results have been obtained for `actor_hidden_bn=True` (apply batch-norm after each hidden layer in actor graphs), `apply_post_bn=False` (apply batch-norm before the non-linearity), `noise_scaling_factor=2` (start from a scaling factor of 2 for the Ornstein–Uhlenbeck noise generation and slowly decrease up to a 0.5x noise)
+*_Important note: the purpose of the grid-search was not to find a actual solution but to find a set of hyperparmeters that assure a very good convergence. That is why for the grid search procedure we only called the training method of the multi-agent engine once after each episode._*
+The initial graphs design has been simplified to a 3 hidden-layer for the actor (128-128-2) and a 128-units layer for the state featurization followed by another two layers (128-1) that receive the state features and the concatenated actions. This is a a considerable difference from the original DDPG architecture, described in [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971), that specifies 400-300-2 for the actor and 400/400/200-200-1 for the critic.
+The grid-search resulted in 64 iterations and best results have been obtained for:
+ - `actor_hidden_bn=True`  : apply batch-norm after each hidden layer in actor graphs
+ - `apply_post_bn=False`   : apply batch-norm before the non-linearity
+ - `noise_scaling_factor=2`: start from a scaling factor of 2 for the Ornstein–Uhlenbeck noise generation and slowly decrease up to a 0.5x noise
 
+```
   {'actor_input_bn': True,  'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 2}
   {'actor_input_bn': True, ' actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': True,  'noise_scaling_factor': 2}
   {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': False, 'noise_scaling_factor': 2}
   {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': True,  'critic_final_bn': False, 'apply_post_bn': False, 'noise_scaling_factor': 2}
   {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 1}
   {'actor_input_bn': False, 'actor_hidden_bn': True, 'critic_state_bn': False, 'critic_final_bn': True,  'apply_post_bn': False, 'noise_scaling_factor': 2} 
+```
+
+The second stage after narrowing the first set of parameters was to introduce `selu` and `elu` non-linearities as well as allow the noise to be generated from a Gaussian rather from the OU process. 
+No improvement has been made over initial `relu` activation by using the new activations however the generation of gaussian noise yielded a big improvement in exploration as well as convergence speed.
+
+### The final training
+
+The final training was done with the following graphs architecture and following hyperparameters: 
+For the actor graph:
+```
+```
+For the critic graph:
+```
+```
+Following a warming-up of 4096 steps/observations the training procedure is called by the environment loop each step.
+The final results for 1000 episodes is below:
+![FinalResults][img/MADDPG_1.png]
+as well as the training history where we can observe for each 100 episodes the final score, the 100-running average score, the 100-running max, overall max score, the loaded buffer size, number of training updates, the noise scaling factors `nsf` and the 100-running mean steps per episode
+```
+```
 
 
 ## Future improvements

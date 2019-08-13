@@ -5,6 +5,7 @@ Created on Tue Jul 30 07:54:58 2019
 @author: Andrei
 """
 
+import matplotlib.pyplot as plt
 
 from collections import deque, OrderedDict
 from unityagents import UnityEnvironment
@@ -96,10 +97,14 @@ def play_env(env, brain_name, train=False, ma_eng=None, num_episodes=5, chk_mem=
   
 
 def ma_ddpg(env, ma_eng: MADDPGEngine, brain_name, n_episodes=1000,
-            n_ep_per_update=1, n_update_per_ep=3, time_steps_per_episode=10000):  
+            n_ep_per_update=1, n_update_per_ep=3, time_steps_per_episode=10000,
+            n_update_per_step=1):  
   last_scores = deque(maxlen=100)
+  last_steps = deque(maxlen=100)
   all_scores = []
-  solved = False
+  all_avg_scores = []
+  all_avg_steps = []
+  solved = 0
   for i_episode in range(1,n_episodes+1):
     ma_eng.current_episode = i_episode
     env_info = env.reset(train_mode=True)[brain_name]     # reset the environment    
@@ -112,31 +117,38 @@ def ma_ddpg(env, ma_eng: MADDPGEngine, brain_name, n_episodes=1000,
       rewards = env_info.rewards                         # get reward (for each agent)
       dones = env_info.local_done                        # see if episode finished
       ma_eng.add_exp(states, actions, rewards, next_states, dones)
+      for updt in range(n_update_per_step):
+        ma_eng.train()
       ep_rewards.append(rewards)
       states = next_states                               # roll over states to next time step
       if np.any(dones):                                  # exit loop if episode finished
         break
+    last_steps.append(ts)
     np_rewards = np.array(ep_rewards)
     scores = np_rewards.sum(axis=0)
     last_score = scores.max()
     all_scores.append(last_score)
     last_scores.append(last_score)
     status_score = np.mean(last_scores)
+    status_steps = np.mean(last_steps)
     max_last_100 = np.max(last_scores)
     max_all = np.max(all_scores)
+    all_avg_scores.append(status_score)
+    all_avg_steps.append(status_steps)
     if (n_ep_per_update >0) and ((i_episode % n_ep_per_update) == 0):
       for upd in range(n_update_per_ep):
         ma_eng.train()
-    print("\rEpisode {:>4} score: {:5.3f},  avg:{:5.3f},  nsf:{:4.2f}".format(
-        i_episode, last_score, status_score, ma_eng.noise_scaling_factor), end='', flush=True)
+    print("\rEpisode {:>4} score: {:5.3f},  avg:{:5.3f},  nsf:{:4.2f}  steps:{:>3}".format(
+        i_episode, last_score, status_score, ma_eng.noise_scaling_factor, ts), end='', flush=True)
     if (i_episode > 0) and (i_episode % 100) == 0:
-      print("\rEpisode {:>4} score:{:5.3f}  avg:{:5.3f}  max100:{:5.3f}  max:{:5.2f}  buff:{:>7}/{}  upd:{}".format(
+      print("\rEpisode {:>4} score:{:5.3f}  avg:{:5.3f}  max100:{:5.3f}  max:{:5.2f}  buff:{:>7}/{}  upd:{}  nsf:{:4.2f}  avg_stp:{:>3}".format(
           i_episode, last_score, status_score, max_last_100, max_all,
-          len(ma_eng.memory), ma_eng.memory.capacity, ma_eng.n_updates), flush=True)
-    if status_score >= 0.5:
+          len(ma_eng.memory), ma_eng.memory.capacity, ma_eng.n_updates,
+          ma_eng.noise_scaling_factor, status_steps), flush=True)
+    if (status_score >= 0.5) and (solved == 0):
       print("\nEnvironment solved in {} episodes!".format(i_episode+1))  
-      solved = True
-  return solved, all_scores
+      solved = i_episode+1
+  return solved, all_scores, all_avg_scores, all_avg_steps
   
 
 
@@ -211,27 +223,23 @@ if __name__ == '__main__':
       "critic_final_layers" : [
             [128],
           ],
-      "actor_input_bn" : [True, False],
-      "actor_hidden_bn" : [True, False],
-      "critic_state_bn" : [True, False],
-      "critic_final_bn" : [True, False],
-      "apply_post_bn"   : [True, False],
-      "noise_scaling_factor" : [2, 1],
+      "actor_input_bn" : [False],   #, True],
+      "actor_hidden_bn" : [True],   #, False]
+      "critic_state_bn" : [True],   #, False],
+      "critic_final_bn" : [True],   #, False],
+      "apply_post_bn"   : [False],  #, True],
+      "noise_scaling_factor" : [2], #, 1],
+      "activation" : ['relu'],      #, 'selu','elu',],
+      "OUNoise" : [False]           #, True],
       }
   
   _combs, _params = grid_dict_to_values(dct_grid)
-  results = {'SOLVED' : [], 'MEAN1000':[], "ITER" : []}
+  results = {'SOLVED' : [], 'MEAN1000':[], 'AVGSTEPS':[], 'ITER' : []}
   pd.set_option('display.max_columns', 500)
   pd.set_option('display.width', 1000)
   for i, _c in enumerate(_combs):
-    reset_seed()
+    iteration_name = "MADDPG_{}".format(i+1)
     dct_pos = grid_pos_to_params(_c, _params)
-    print("\n\nITERATION {}/{}  {}".format(i, len(_combs), dct_pos))
-    if dct_pos['noise_scaling_factor'] == 1:
-      noise_scaling_factor_dec = 1
-    else:
-      noise_scaling_factor_dec = 0.9999
-      
     if (
         (dct_pos['apply_post_bn'] == True) and
         (dct_pos['actor_input_bn'] == False) and
@@ -240,6 +248,13 @@ if __name__ == '__main__':
         (dct_pos['critic_final_bn'] == False)
        ):
       continue
+    reset_seed()
+    print("\n\nITERATION {}/{}  {}".format(i+1, len(_combs), dct_pos))
+    if dct_pos['noise_scaling_factor'] == 1:
+      noise_scaling_factor_dec = 1
+    else:
+      noise_scaling_factor_dec = 0.9999
+      
     
     eng = MADDPGEngine(action_size=action_size, 
                        state_size=state_size, 
@@ -248,9 +263,10 @@ if __name__ == '__main__':
                        **dct_pos,
                        )
     
-    solved, scores = ma_ddpg(env, eng, brain_name)
+    solved, all_scores, avg_scores, avg_steps = ma_ddpg(env, eng, brain_name)
     results['SOLVED'].append(solved)
-    results['MEAN1000'].append(np.mean(scores))
+    results['AVG_SCRS'].append(np.mean(avg_scores))
+    results['AVG_STPS'].append(np.mean(avg_steps))
     results['ITER'].append(i)
 #    for k,v in dct_pos.items():
 #      if k not in results.keys():
@@ -258,6 +274,17 @@ if __name__ == '__main__':
 #      results[k].append(v)
     df = pd.DataFrame(results).sort_values('MEAN1000')
     print(df)
+
+    plt.plot(np.arange(1, len(all_scores)+1), all_scores,"-b", label='score')
+    plt.plot(np.arange(1, len(all_scores)+1), avg_scores,"-r", label='avg score @100')
+    plt.plot(np.arange(1, len(all_scores)+1), avg_steps,"-k", label='avg steps @100')
+    plt.ylabel('Score')
+    plt.xlabel('Episode #')
+    plt.legend()
+    plt.title("Unity Tennis MADDPG - " + iteration_name)
+    plt.axhline(y=0.5, linestyle='--', color='green')
+    plt.savefig(iteration_name+'.png')
+    plt.show()
   
   env.close()
 

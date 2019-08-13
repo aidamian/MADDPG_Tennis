@@ -32,7 +32,8 @@ class MADDPGActor(nn.Module):
                layers=[256, 128], # 256 128
                init_custom=True, use_input_bn=False, use_hidden_bn=False,
                bn_post=False,
-               model_name='actor'):
+               model_name='actor',
+               activation='relu'):
     """
     The configurable Actor module
     layers: configurable stream of layers - allways outputs a tanh
@@ -54,9 +55,19 @@ class MADDPGActor(nn.Module):
       self.layers.append(nn.Linear(pre_units, L, bias=use_bias))
       if use_hidden_bn and not bn_post:
           self.layers.append(nn.BatchNorm1d(L))
-      self.layers.append(nn.ReLU())
+          
+      if activation == 'relu':
+        self.layers.append(nn.ReLU())
+      elif activation == 'elu':
+        self.layers.append(nn.ELU())
+      elif activation == 'selu':
+        self.layers.append(nn.SELU())
+      else:
+        raise ValueError("Unknown activation!")
+        
       if use_hidden_bn and bn_post:
           self.layers.append(nn.BatchNorm1d(L))
+          
       pre_units = L
     self.final_linear = nn.Linear(pre_units, output_size)
     self.final_activation = nn.Tanh()
@@ -88,7 +99,8 @@ class MADDPGCritic(nn.Module):
                bn_post=False,
                act_bn=False,
                other_bn=False,
-               model_name='critic'
+               model_name='critic',
+               activation='relu',
                ):
     """
     The Critic module can be easily configured to almost any number of layers. It currently support three main
@@ -111,11 +123,19 @@ class MADDPGCritic(nn.Module):
         for L in state_layers:
             self.state_layers.append(nn.Linear(pre_units, L))
             if state_bn and not bn_post:
-                self.state_layers.append(nn.BatchNorm1d(L))
+              self.state_layers.append(nn.BatchNorm1d(L))
             if leaky:
-                self.state_layers.append(nn.LeakyReLU())
+              self.state_layers.append(nn.LeakyReLU())
             else:
+              if activation == 'relu':
                 self.state_layers.append(nn.ReLU())
+              elif activation == 'elu':
+                self.state_layers.append(nn.ELU())
+              elif activation == 'selu':
+                self.state_layers.append(nn.SELU())
+              else:
+                raise ValueError("Unknown activation!")
+                
             if state_bn and bn_post:
                 self.state_layers.append(nn.BatchNorm1d(L))
             pre_units = L
@@ -127,11 +147,19 @@ class MADDPGCritic(nn.Module):
         for L in act_layers:
             self.act_layers.append(nn.Linear(pre_units, L))
             if act_bn and not bn_post:
-                self.act_layers.append(nn.BatchNorm1d(L))                    
+              self.act_layers.append(nn.BatchNorm1d(L))                    
             if leaky:
-                self.act_layers.append(nn.LeakyReLU())
+              self.act_layers.append(nn.LeakyReLU())
             else:
+              if activation == 'relu':
                 self.act_layers.append(nn.ReLU())
+              elif activation == 'elu':
+                self.act_layers.append(nn.ELU())
+              elif activation == 'selu':
+                self.act_layers.append(nn.SELU())
+              else:
+                raise ValueError("Unknown activation!")
+
             if act_bn and bn_post:
                 self.act_layers.append(nn.BatchNorm1d(L))                    
             pre_units = L
@@ -141,11 +169,19 @@ class MADDPGCritic(nn.Module):
     for L in final_layers:
         self.final_layers.append(nn.Linear(pre_units, L))
         if other_bn and not bn_post:
-            self.final_layers.append(nn.BatchNorm1d(L))                    
+          self.final_layers.append(nn.BatchNorm1d(L))                    
         if leaky:
-            self.final_layers.append(nn.LeakyReLU())
+          self.final_layers.append(nn.LeakyReLU())
         else:
+          if activation == 'relu':
             self.final_layers.append(nn.ReLU())
+          elif activation == 'elu':
+            self.final_layers.append(nn.ELU())
+          elif activation == 'selu':
+            self.final_layers.append(nn.SELU())
+          else:
+            raise ValueError("Unknown activation!")
+
         if other_bn and bn_post:
             self.final_layers.append(nn.BatchNorm1d(L))                    
         pre_units = L        

@@ -52,11 +52,14 @@ class DDPGAgent():
                critic_final_layers=[512],
                critic_state_bn=True,
                critic_final_bn=False,
+               OUnoise=True,
+               activation='relu',
                ):
     self.act_size = a_size
     self.obs_size = s_size
     self.dev = dev
     self.name = name
+    self.OUnoise = OUnoise
     self.LR_CRITIC = LR_CRITIC
     self.LR_ACTOR = LR_ACTOR
     self.TAU = TAU
@@ -69,12 +72,14 @@ class DDPGAgent():
                              bn_post=bn_post,
                              use_input_bn=actor_input_bn,
                              use_hidden_bn=actor_hidden_bn,
+                             activation=activation,
                              model_name=self.name+'_actor').to(self.dev)
     self.actor_target = MADDPGActor(input_size=self.obs_size,
                                     bn_post=bn_post,
                                     layers=actor_layers,
                                     use_input_bn=actor_input_bn,
                                     use_hidden_bn=actor_hidden_bn,
+                                    activation=activation,
                                     output_size=self.act_size).to(self.dev)
     self.actor_optimizer = th.optim.Adam(params=self.actor.parameters(),
                                          lr=self.LR_ACTOR)
@@ -88,6 +93,7 @@ class DDPGAgent():
                                final_layers=critic_final_layers,
                                state_bn=critic_state_bn,
                                other_bn=critic_final_bn,
+                               activation=activation,
                                model_name=self.name+'_critic').to(self.dev)
     self.critic_target = MADDPGCritic(state_size=self.obs_size*obs_mult,
                                       bn_post=bn_post,
@@ -95,6 +101,7 @@ class DDPGAgent():
                                       state_bn=critic_state_bn,
                                       other_bn=critic_final_bn,
                                       final_layers=critic_final_layers,
+                                      activation=activation,
                                       act_size=self.act_size*n_agents).to(self.dev)
     self.critic_optimizer = th.optim.Adam(params=self.critic.parameters(),
                                           lr=self.LR_CRITIC)
@@ -105,9 +112,18 @@ class DDPGAgent():
     
     return
   
+  def get_noise(self, shape=None):
+    if self.OUnoise:
+      return self.noise.noise()
+    else:
+      if shape is None:
+        shape = (self.act_size,)
+      return np.random.randn(*shape) * 0.5
+  
   def show_architecture(self):
-    print("Agent '{}' initialized with:\nActor:\n{}\nCritic:\n{}".format(
-        self.name, self.actor, self.critic))
+    print("Agent '{}' initialized with:\nActor:\n{}\nCritic:\n{}\n Noise: using {}".format(
+        self.name, self.actor, self.critic,
+        "OU-noise" if self.OUnoise else "Gaussian noise"))
     
   
   def act(self, state, noise_scale):
@@ -117,7 +133,7 @@ class DDPGAgent():
     self.actor.eval()
     action = self.actor(obs).detach().cpu().numpy()
     self.actor.train()
-    np_noise = noise_scale * self.noise.noise()
+    np_noise = noise_scale * self.get_noise()
     action = action + np_noise
     action = np.clip(action, -1, 1)
     return action
