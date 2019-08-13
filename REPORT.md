@@ -1,4 +1,4 @@
-#  MADDPG implementation in PyTorch of Collaboration and Competition
+#  MADDPG implementation in PyTorch for Unity Tennis environment
 
 ## Introduction
 
