@@ -43,7 +43,7 @@ def calc_huber_weighted_residual(th_res, d=1, th_weights=None):
 
 class DDPGAgent():
   def __init__(self, a_size, s_size, dev, n_agents, overview_state=False, 
-               LR_ACTOR=1e-4, LR_CRITIC=5e-4, TAU=5e-3, name='agent',
+               LR_ACTOR=1e-4, LR_CRITIC=2e-4, TAU=5e-3, name='agent',
                bn_post=False, 
                actor_layers=[512,512],
                actor_input_bn=True,
@@ -121,9 +121,11 @@ class DDPGAgent():
       return np.random.randn(*shape) * 0.5
   
   def show_architecture(self):
-    print("Agent '{}' initialized with:\nActor:\n{}\nCritic:\n{}\n Noise: using {}".format(
+    print("Agent '{}' initialized with:\nActor:\n{}\nCritic:\n{}\n  Noise: {}".format(
         self.name, self.actor, self.critic,
         "OU-noise" if self.OUnoise else "Gaussian noise"))
+    print("  Actor LR:  {}".format(self.actor_optimizer.state_dict()['param_groups'][0]['lr']))
+    print("  Critic LR: {}".format(self.critic_optimizer.state_dict()['param_groups'][0]['lr']))
     
   
   def act(self, state, noise_scale):
@@ -145,8 +147,9 @@ class DDPGAgent():
     return
 
 
-  def save(self, label):
-    fn = '{}_actor_it_{:010}_{}.policy'.format(self.name, self.train_iters, label)
+  def save(self, label):    
+    fn = 'models/{}_actor_ep_{:04}_{}.policy'.format(self.name, self.train_iters, label)
+    print("  Saving {}...".format(fn))
     th.save(self.actor.state_dict(), fn)
     return
 

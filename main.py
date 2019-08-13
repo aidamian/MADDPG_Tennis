@@ -7,7 +7,7 @@ Created on Tue Jul 30 07:54:58 2019
 
 import matplotlib.pyplot as plt
 
-from collections import deque, OrderedDict
+from collections import OrderedDict
 from unityagents import UnityEnvironment
 import numpy as np
 from time import time
@@ -96,61 +96,31 @@ def play_env(env, brain_name, train=False, ma_eng=None, num_episodes=5, chk_mem=
   return
   
 
-def ma_ddpg(env, ma_eng: MADDPGEngine, brain_name, n_episodes=1000,
-            n_ep_per_update=1, n_update_per_ep=3, time_steps_per_episode=10000,
-            n_update_per_step=1):  
-  last_scores = deque(maxlen=100)
-  last_steps = deque(maxlen=100)
-  all_scores = []
-  all_avg_scores = []
-  all_avg_steps = []
-  solved = 0
-  for i_episode in range(1,n_episodes+1):
-    ma_eng.current_episode = i_episode
-    env_info = env.reset(train_mode=True)[brain_name]     # reset the environment    
-    states = env_info.vector_observations                  # get the current state (for each agent)
-    ep_rewards = []
-    for ts in range(time_steps_per_episode):
-      actions = ma_eng.act(states, add_noise=True)
-      env_info = env.step(actions)[brain_name]           # send all actions to tne environment
-      next_states = env_info.vector_observations         # get next state (for each agent)
-      rewards = env_info.rewards                         # get reward (for each agent)
-      dones = env_info.local_done                        # see if episode finished
-      ma_eng.add_exp(states, actions, rewards, next_states, dones)
-      for updt in range(n_update_per_step):
-        ma_eng.train()
-      ep_rewards.append(rewards)
-      states = next_states                               # roll over states to next time step
-      if np.any(dones):                                  # exit loop if episode finished
-        break
-    last_steps.append(ts)
-    np_rewards = np.array(ep_rewards)
-    scores = np_rewards.sum(axis=0)
-    last_score = scores.max()
-    all_scores.append(last_score)
-    last_scores.append(last_score)
-    status_score = np.mean(last_scores)
-    status_steps = np.mean(last_steps)
-    max_last_100 = np.max(last_scores)
-    max_all = np.max(all_scores)
-    all_avg_scores.append(status_score)
-    all_avg_steps.append(status_steps)
-    if (n_ep_per_update >0) and ((i_episode % n_ep_per_update) == 0):
-      for upd in range(n_update_per_ep):
-        ma_eng.train()
-    print("\rEpisode {:>4} score: {:5.3f},  avg:{:5.3f},  nsf:{:4.2f}  steps:{:>3}".format(
-        i_episode, last_score, status_score, ma_eng.noise_scaling_factor, ts), end='', flush=True)
-    if (i_episode > 0) and (i_episode % 100) == 0:
-      print("\rEpisode {:>4} score:{:5.3f}  avg:{:5.3f}  max100:{:5.3f}  max:{:5.2f}  buff:{:>7}/{}  upd:{}  nsf:{:4.2f}  avg_stp:{:>3}".format(
-          i_episode, last_score, status_score, max_last_100, max_all,
-          len(ma_eng.memory), ma_eng.memory.capacity, ma_eng.n_updates,
-          ma_eng.noise_scaling_factor, status_steps), flush=True)
-    if (status_score >= 0.5) and (solved == 0):
-      print("\nEnvironment solved in {} episodes!".format(i_episode+1))  
-      solved = i_episode+1
-  return solved, all_scores, all_avg_scores, all_avg_steps
   
 
+def grid_dict_to_values(params_grid):
+  """
+  method to convert a grid serach dict into a list of all combinations
+  returns combinations and param names for each combination entry
+  """
+  params = []
+  values = []
+  for k in params_grid:
+    params.append(k)
+    assert type(params_grid[k]) is list, 'All grid-search params must be lists. Error: {}'.format(k)
+    values.append(params_grid[k])
+  combs = list(itertools.product(*values))
+  return combs, params
+
+def grid_pos_to_params(grid_data, params):
+  """
+  converts a grid search combination to a dict for callbacks that expect kwargs
+  """
+  func_kwargs = {}
+  for j,k in enumerate(params):
+    func_kwargs[k] = grid_data[j]
+  return func_kwargs    
+  
 
 
 if __name__ == '__main__':
@@ -161,7 +131,8 @@ if __name__ == '__main__':
     
   """
   
-  env = UnityEnvironment(file_name="Tennis_Windows_x86_64/Tennis.exe")
+  env = UnityEnvironment(file_name="Tennis_Windows_x86_64/Tennis.exe",
+                         seed=1234)
   # get the default brain
   brain_name = env.brain_names[0]
   brain = env.brains[brain_name]
@@ -188,30 +159,8 @@ if __name__ == '__main__':
     play_env(env)
     play_env(env, brain_name, train=True, chk_mem=True)
 
-  def grid_dict_to_values(params_grid):
-    """
-    method to convert a grid serach dict into a list of all combinations
-    returns combinations and param names for each combination entry
-    """
-    params = []
-    values = []
-    for k in params_grid:
-      params.append(k)
-      assert type(params_grid[k]) is list, 'All grid-search params must be lists. Error: {}'.format(k)
-      values.append(params_grid[k])
-    combs = list(itertools.product(*values))
-    return combs, params
 
-  def grid_pos_to_params(grid_data, params):
-    """
-    converts a grid search combination to a dict for callbacks that expect kwargs
-    """
-    func_kwargs = {}
-    for j,k in enumerate(params):
-      func_kwargs[k] = grid_data[j]
-    return func_kwargs    
-  
-    
+  n_max_ts = 20000   
     
   dct_grid = {
       "actor_layers" : [ 
@@ -226,66 +175,82 @@ if __name__ == '__main__':
       "actor_input_bn" : [False],   #, True],
       "actor_hidden_bn" : [True],   #, False]
       "critic_state_bn" : [True],   #, False],
-      "critic_final_bn" : [True],   #, False],
+      "critic_final_bn" : [False],  #, True],
       "apply_post_bn"   : [False],  #, True],
       "noise_scaling_factor" : [2], #, 1],
       "activation" : ['relu'],      #, 'selu','elu',],
-      "OUNoise" : [False]           #, True],
+      "OUNoise" : [False],          #, True],
+
+
+      "noise_scaling_min"         : [0.2, 0.5],
+      "LR_ACTOR"                  : [1e-4],
+      "LR_CRITIC"                 : [2e-4],
       }
   
   _combs, _params = grid_dict_to_values(dct_grid)
-  results = {'SOLVED' : [], 'MEAN1000':[], 'AVGSTEPS':[], 'ITER' : []}
+  results = OrderedDict( 
+      {'SOLVED' : [], 'AVG_SCRS':[], 'AVG_STPS':[], 'MODEL' : []}
+      )
   pd.set_option('display.max_columns', 500)
   pd.set_option('display.width', 1000)
-  for i, _c in enumerate(_combs):
-    iteration_name = "MADDPG_{}".format(i+1)
-    dct_pos = grid_pos_to_params(_c, _params)
-    if (
-        (dct_pos['apply_post_bn'] == True) and
-        (dct_pos['actor_input_bn'] == False) and
-        (dct_pos['actor_hidden_bn'] == False) and
-        (dct_pos['critic_state_bn'] == False) and
-        (dct_pos['critic_final_bn'] == False)
-       ):
-      continue
-    reset_seed()
-    print("\n\nITERATION {}/{}  {}".format(i+1, len(_combs), dct_pos))
-    if dct_pos['noise_scaling_factor'] == 1:
-      noise_scaling_factor_dec = 1
-    else:
-      noise_scaling_factor_dec = 0.9999
+  plt.style.use('ggplot')
+  ### with active_session(): --- if you use Jupyter
+  for trial in range(2):
+    for i, _c in enumerate(_combs):
+      iteration_name = "MADDPG{}_T{}".format(i+1, trial+1)
+      dct_pos = grid_pos_to_params(_c, _params)
+      if (
+          (dct_pos['apply_post_bn'] == True) and
+          (dct_pos['actor_input_bn'] == False) and
+          (dct_pos['actor_hidden_bn'] == False) and
+          (dct_pos['critic_state_bn'] == False) and
+          (dct_pos['critic_final_bn'] == False)
+         ):
+        continue
+      reset_seed()
+      print("\n\nTRIAL {} ITERATION {}/{}  {}".format(trial+1, i+1, len(_combs), dct_pos))
+      if dct_pos['noise_scaling_factor'] == 1:
+        noise_scaling_factor_dec = 1
+      else:
+        noise_scaling_factor_dec = 0.9999
+        
       
-    
-    eng = MADDPGEngine(action_size=action_size, 
-                       state_size=state_size, 
-                       n_agents=num_agents,
-                       noise_scaling_factor_dec=noise_scaling_factor_dec,
-                       **dct_pos,
-                       )
-    
-    solved, all_scores, avg_scores, avg_steps = ma_ddpg(env, eng, brain_name)
-    results['SOLVED'].append(solved)
-    results['AVG_SCRS'].append(np.mean(avg_scores))
-    results['AVG_STPS'].append(np.mean(avg_steps))
-    results['ITER'].append(i)
-#    for k,v in dct_pos.items():
-#      if k not in results.keys():
-#        results[k] = []
-#      results[k].append(v)
-    df = pd.DataFrame(results).sort_values('MEAN1000')
-    print(df)
+      eng = MADDPGEngine(action_size=action_size, 
+                         state_size=state_size, 
+                         n_agents=num_agents,
+                         noise_scaling_factor_dec=noise_scaling_factor_dec,
+                         name=iteration_name,
+                         **dct_pos,
+                         )
 
-    plt.plot(np.arange(1, len(all_scores)+1), all_scores,"-b", label='score')
-    plt.plot(np.arange(1, len(all_scores)+1), avg_scores,"-r", label='avg score @100')
-    plt.plot(np.arange(1, len(all_scores)+1), avg_steps,"-k", label='avg steps @100')
-    plt.ylabel('Score')
-    plt.xlabel('Episode #')
-    plt.legend()
-    plt.title("Unity Tennis MADDPG - " + iteration_name)
-    plt.axhline(y=0.5, linestyle='--', color='green')
-    plt.savefig(iteration_name+'.png')
-    plt.show()
-  
-  env.close()
+      res = eng.run_on_unity(env, brain_name,
+                             time_steps_per_episode=n_max_ts,
+                             DEBUG=0)
+      solved, all_scores, avg_scores, avg_steps = res
+      results['SOLVED'].append(solved)
+      results['AVG_SCRS'].append(np.mean(avg_scores))
+      results['AVG_STPS'].append(np.mean(avg_steps))
+      results['MODEL'].append(iteration_name)
+  #    for k,v in dct_pos.items():
+  #      if k not in results.keys():
+  #        results[k] = []
+  #      results[k].append(v)
+      df = pd.DataFrame(results).sort_values('AVG_SCRS')
+      print(df)
+      print("Plotting")
+      fig, ax = plt.subplots(2, 1, figsize=(14,20))
+      ax[0].plot(np.arange(1, len(all_scores)+1), all_scores,"-b", label='score')
+      ax[0].plot(np.arange(1, len(all_scores)+1), avg_scores,"-r", label='avg score @100')
+      ax[0].set_ylabel('Score')
+      ax[0].set_xlabel('Episode #')
+      ax[0].axhline(y=0.5, linestyle='--', color='green')
+      ax[0].legend()
+      ax[1].plot(np.arange(1, len(all_scores)+1), avg_steps,"-k", label='avg steps @100')
+      ax[1].set_ylabel('Nr.Steps')
+      ax[1].set_xlabel('Episode #')
+      ax[1].legend()
+      fig.suptitle("Unity Tennis - " + iteration_name, fontsize=20)
+      plt.savefig("img/"+iteration_name+'.png')
+      plt.show()
 
 
