@@ -53,6 +53,8 @@ In order to find optimal solution we performed multi-step grid-search. The first
       }
 ```
 
+For the above grid-search a mini-framework has been developed consisting in a dictionary-to-iterations expander as well as a iteration parameters generator. The dictionary contains the exact definition of the `MADDPGEngine` object initialization parameters.
+
 
 >_*Important note*: the purpose of the grid-search was not to find a actual solution but to find a set of hyperparmeters that assure a very good convergence. That is why for the grid search procedure we only called the training method of the multi-agent engine once after each episode._
 
@@ -115,6 +117,8 @@ The final results for 1000 episodes is below:
 
 ![FinalResults](img/MADDPG1_T1_v1.png)
 
+In this chart we can see both the scores as required by the proposed environment "engagement rules" as well as maximum number of steps the agents are able to sustain each episode _(there is a obvious correlation between the average scores and the capacity to sustain up to 1000 steps of game-play)_
+
 Also, we have below the training history where we can observe for each 100 episodes the following indicators: final score of the 100x series of episodes, the 100-running average score, the 100-running max, overall max score, the loaded buffer size, number of training updates, the noise scaling factors `nsf` and the 100-running mean steps per episode
 ```
 Episode  100 score:0.000  avg:0.014  max100:0.100  max: 0.10  buff:   1701/20000  upd:     0  nsf:2.00  avg_stp: 16.0
@@ -130,6 +134,10 @@ Episode  800 score:0.300  avg:0.430  max100:2.700  max: 2.70  buff:  20000/20000
 Episode  900 score:0.000  avg:0.703  max100:2.700  max: 2.70  buff:  20000/20000  upd: 85422  nsf:0.20  avg_stp:274.2
 Episode 1000 score:0.300  avg:0.936  max100:2.700  max: 2.70  buff:  20000/20000  upd:121792  nsf:0.20  avg_stp:359.7
 ```
+
+### Saved results & testing
+
+Multiple "final-training" iterations have been made resulting in multiple chart outputs (that can be found in `img/` folder) similar with the one above and also multiple saved models (`models/` folder). Within the local version of the experiment contained in the `main.py` file there is also a final procedure that runs the environment in testing mode using a couple of saved actors - _make sure you enable the testing with `RUN_TEST = True`_.
 
 ## Future improvements
 

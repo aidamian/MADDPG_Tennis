@@ -131,6 +131,9 @@ if __name__ == '__main__':
     
   """
   
+  RUN_DEMO = True
+  RUN_TRAIN = False
+  
   env = UnityEnvironment(file_name="Tennis_Windows_x86_64/Tennis.exe",
                          seed=1234)
   # get the default brain
@@ -161,7 +164,7 @@ if __name__ == '__main__':
 
 
   n_max_ts = 20000   
-    
+  
   dct_grid = {
       "actor_layers" : [ 
               [128, 128],
@@ -188,69 +191,86 @@ if __name__ == '__main__':
       }
   
   _combs, _params = grid_dict_to_values(dct_grid)
-  results = OrderedDict( 
-      {'SOLVED' : [], 'AVG_SCRS':[], 'AVG_STPS':[], 'MODEL' : []}
-      )
-  pd.set_option('display.max_columns', 500)
-  pd.set_option('display.width', 1000)
-  plt.style.use('ggplot')
-  ### with active_session(): --- if you use Jupyter
-  for trial in range(2):
-    for i, _c in enumerate(_combs):
-      iteration_name = "MADDPG{}_T{}".format(i+1, trial+1)
-      dct_pos = grid_pos_to_params(_c, _params)
-      if (
-          (dct_pos['apply_post_bn'] == True) and
-          (dct_pos['actor_input_bn'] == False) and
-          (dct_pos['actor_hidden_bn'] == False) and
-          (dct_pos['critic_state_bn'] == False) and
-          (dct_pos['critic_final_bn'] == False)
-         ):
-        continue
-      reset_seed()
-      print("\n\nTRIAL {} ITERATION {}/{}  {}".format(trial+1, i+1, len(_combs), dct_pos))
-      if dct_pos['noise_scaling_factor'] == 1:
-        noise_scaling_factor_dec = 1
-      else:
-        noise_scaling_factor_dec = 0.9999
+  
+  
+  if RUN_TRAIN:
+    
+    results = OrderedDict( 
+        {'SOLVED' : [], 'AVG_SCRS':[], 'AVG_STPS':[], 'MODEL' : []}
+        )
+    pd.set_option('display.max_columns', 500)
+    pd.set_option('display.width', 1000)
+    plt.style.use('ggplot')
+    ### with active_session(): --- if you use Jupyter
+    for trial in range(2):
+      for i, _c in enumerate(_combs):
+        iteration_name = "MADDPG{}_T{}".format(i+1, trial+1)
+        dct_pos = grid_pos_to_params(_c, _params)
+        if (
+            (dct_pos['apply_post_bn'] == True) and
+            (dct_pos['actor_input_bn'] == False) and
+            (dct_pos['actor_hidden_bn'] == False) and
+            (dct_pos['critic_state_bn'] == False) and
+            (dct_pos['critic_final_bn'] == False)
+           ):
+          continue
+        reset_seed()
+        print("\n\nTRIAL {} ITERATION {}/{}  {}".format(trial+1, i+1, len(_combs), dct_pos))
+        if dct_pos['noise_scaling_factor'] == 1:
+          noise_scaling_factor_dec = 1
+        else:
+          noise_scaling_factor_dec = 0.9999
+          
         
-      
-      eng = MADDPGEngine(action_size=action_size, 
-                         state_size=state_size, 
-                         n_agents=num_agents,
-                         noise_scaling_factor_dec=noise_scaling_factor_dec,
-                         name=iteration_name,
-                         **dct_pos,
-                         )
+        eng = MADDPGEngine(action_size=action_size, 
+                           state_size=state_size, 
+                           n_agents=num_agents,
+                           noise_scaling_factor_dec=noise_scaling_factor_dec,
+                           name=iteration_name,
+                           **dct_pos,
+                           )
+  
+        res = eng.run_on_unity(env, brain_name,
+                               time_steps_per_episode=n_max_ts,
+                               DEBUG=0)
+        solved, all_scores, avg_scores, avg_steps = res
+        results['SOLVED'].append(solved)
+        results['AVG_SCRS'].append(np.mean(avg_scores))
+        results['AVG_STPS'].append(np.mean(avg_steps))
+        results['MODEL'].append(iteration_name)
+    #    for k,v in dct_pos.items():
+    #      if k not in results.keys():
+    #        results[k] = []
+    #      results[k].append(v)
+        df = pd.DataFrame(results).sort_values('AVG_SCRS')
+        print(df)
+        print("Plotting")
+        fig, ax = plt.subplots(2, 1, figsize=(14,20))
+        ax[0].plot(np.arange(1, len(all_scores)+1), all_scores,"-b", label='score')
+        ax[0].plot(np.arange(1, len(all_scores)+1), avg_scores,"-r", label='avg score @100')
+        ax[0].set_ylabel('Score')
+        ax[0].set_xlabel('Episode #')
+        ax[0].axhline(y=0.5, linestyle='--', color='green')
+        ax[0].legend()
+        ax[1].plot(np.arange(1, len(all_scores)+1), avg_steps,"-k", label='avg steps @100')
+        ax[1].set_ylabel('Nr.Steps')
+        ax[1].set_xlabel('Episode #')
+        ax[1].legend()
+        fig.suptitle("Unity Tennis - " + iteration_name, fontsize=20)
+        plt.savefig("img/"+iteration_name+'.png')
+        plt.show()
+  
+  
 
-      res = eng.run_on_unity(env, brain_name,
-                             time_steps_per_episode=n_max_ts,
-                             DEBUG=0)
-      solved, all_scores, avg_scores, avg_steps = res
-      results['SOLVED'].append(solved)
-      results['AVG_SCRS'].append(np.mean(avg_scores))
-      results['AVG_STPS'].append(np.mean(avg_steps))
-      results['MODEL'].append(iteration_name)
-  #    for k,v in dct_pos.items():
-  #      if k not in results.keys():
-  #        results[k] = []
-  #      results[k].append(v)
-      df = pd.DataFrame(results).sort_values('AVG_SCRS')
-      print(df)
-      print("Plotting")
-      fig, ax = plt.subplots(2, 1, figsize=(14,20))
-      ax[0].plot(np.arange(1, len(all_scores)+1), all_scores,"-b", label='score')
-      ax[0].plot(np.arange(1, len(all_scores)+1), avg_scores,"-r", label='avg score @100')
-      ax[0].set_ylabel('Score')
-      ax[0].set_xlabel('Episode #')
-      ax[0].axhline(y=0.5, linestyle='--', color='green')
-      ax[0].legend()
-      ax[1].plot(np.arange(1, len(all_scores)+1), avg_steps,"-k", label='avg steps @100')
-      ax[1].set_ylabel('Nr.Steps')
-      ax[1].set_xlabel('Episode #')
-      ax[1].legend()
-      fig.suptitle("Unity Tennis - " + iteration_name, fontsize=20)
-      plt.savefig("img/"+iteration_name+'.png')
-      plt.show()
-
-
+  if RUN_DEMO:
+    maddpg_params = grid_pos_to_params(_combs[0], _params)
+    fn_agents = ['Agent1_Actor.policy', 'Agent2_Actor.policy']
+    eng = MADDPGEngine(action_size=action_size, 
+                       state_size=state_size, 
+                       n_agents=num_agents,
+                       **maddpg_params)
+    eng.load(fn_agents)
+    play_env(env, brain_name, ma_eng=eng, num_episodes=3)
+    
+  env.close()
+    

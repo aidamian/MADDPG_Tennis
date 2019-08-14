@@ -114,6 +114,13 @@ class MADDPGEngine():
       agent.save('')
     return
   
+  def load(self, lst_agent_files):
+    if len(lst_agent_files) != len(self.agents):
+      raise ValueError("Number of agents must equal number of files!")
+    print("{} Loading actors...".format(self.__name__))
+    for i, agent in enumerate(self.agents):
+      agent.load(lst_agent_files[i])
+  
   
   def train(self, n_samples=None):
     avail_data = len(self.memory)
@@ -132,7 +139,11 @@ class MADDPGEngine():
     """
     if n_samples is None:
       n_samples = self.BATCH_SIZE
-    # get n_samples from memory
+      
+    ### get n_samples from memory
+    ### the following lines of code are based on non-vectorized approaches for readability
+    ### and educational purpose
+    
     samples = self.memory.sample(n_samples)
     _states, _actions, _rewards, _next_states, _dones = samples
     # prpare tensors for each agent
@@ -145,6 +156,10 @@ class MADDPGEngine():
     # these are the actual tensors for the current agent that is being trained
     (th_agent_obs, th_agent_action, th_agent_reward, 
      th_agent_next_obs, th_agent_done) = experiences_per_agent[agent_no]
+    
+    ###
+    ###
+    ###
     
     th_agent_reward = th_agent_reward.unsqueeze(1)
     th_agent_done = th_agent_done.unsqueeze(1)

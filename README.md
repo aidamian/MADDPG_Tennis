@@ -33,6 +33,27 @@ The environment is considered solved, when the average (over 100 episodes) of th
 
 4. When loading the environment with `UnityEnvironment(file_name="FOLDER/Tennis.exe")` make sure you replace `FOLDER` with the right path.
 
+## Running the experiment
+
+1. First step is make sure you installed the environment as presented in above steps. If you are using the local version of the experiment contained in the `main.py` then make sure the line 137 in the contains the right path to the installed Tennis Unity env (replace `Tennis_Windows_x86_64` with your own folder.
+
+```
+ env = UnityEnvironment(file_name="Tennis_Windows_x86_64/Tennis.exe",
+                        seed=1234)
+```
+
+2. Second step is straight forward when running local version `main.py`:
+- If you just want to run a test then make sure you have `RUN_DEMO = True` on line 134 
+- If you want also to run a training cycle make sure you have `RUN_TRAIN = True`. When running in training mode you can play with the `MADDPGEngine` parameters defined in the self-explained `dct_grid` at line 168. More details can be found [here](REPORT.md)
+- Finally the actual running is just `python main.py` ...
+
+3. For the Jupyter notebook version make sure you give the full path to the `UnityEnvironment` constructor similar to the way described for the local version. Basically make sure that the below line points to the right folder:
+```
+env = UnityEnvironment(file_name="/data/Tennis_Linux_NoVis/Tennis", seed=1234)
+```
+
+4. Enjoy :)
+
 ## Implementation details
 
 The full implementation details can be found [here](REPORT.md)

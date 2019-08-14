@@ -152,6 +152,22 @@ class DDPGAgent():
     print("  Saving {}...".format(fn))
     th.save(self.actor.state_dict(), fn)
     return
+  
+  def load(self, fn):
+    import os
+    fn1 = fn
+    fn2 = os.path.join('models/',fn)
+    fn_to_load = None
+    if os.path.isfile(fn1):
+      fn_to_load = fn1
+    elif os.path.isfile(fn2):
+      fn_to_load = fn2
+    else:
+      raise ValueError("File '{}' not found!".format(fn))
+    print("  {} loading '{}'".format(self.name, fn_to_load))
+    self.actor.load_state_dict(th.load(fn_to_load))
+    print("{} Actor loaded:\n{}".format(self.name, self.actor))
+    
 
   
   def soft_update_actor(self):
