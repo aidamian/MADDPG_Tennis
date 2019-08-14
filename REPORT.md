@@ -12,11 +12,12 @@ The modules are divided as follows:
  - `brain.py` defines the graphs that are used for actors and critics
  - `ma_per.py` contains the replay buffer definition including the prioritized experience buffers (_work in progress_)
  - `OUNoise.py` contains the Ornstein–Uhlenbeck process noise generation class
- - `main.py` is the local version of the main code that can be used locally (without the Jupyter Notebook). Basically we have both the option of running locally the code with `main.py` as well as running the notebook `Tennis.ipynb`
+ - `main.py` is the local version of the main code that can be used locally (without the Jupyter Notebook). Basically we have both the option of running locally the code with `main.py` as well as running the notebook `Tennis.ipynb`. This is basically where the Unity environment is created as well as the `MADDPGEngine` class is instantiated.
  
 The overall Multi-Agent DDPG approach follows the proposed approach from _[Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments](https://arxiv.org/abs/1706.02275)_. Basically, each of the two agents optimize their online critics and then use the critic direct output to perform gradient descent in the inverse direction of the critic's output.
 ![MADDPG](img/maddpg.png)
-The training pseudo-code can be summarized as:
+The training pseudo-code that can be found in `MADDPGEngine.train()` can be summarized as:
+
 ```
   for each agent:
     both agents target actors computes next_action
@@ -29,6 +30,19 @@ The training pseudo-code can be summarized as:
   for each agent:
     slowly transfer weights from online to target graphs
 ```
+
+The main loop for our experiment is also residing in `MADDPEngine` in the `run_on_unity` function and the actual pseudo-code is the following:
+
+```
+  for all proposed episodes
+    reset env
+    for all proposed steps
+      determine actions and send to the env
+      obtain env feedback on actions
+      train if enough data is available    
+    asses training progress      
+```
+
 ### The grid-search
 
 In order to find optimal solution we performed multi-step grid-search. The first grid-search dictionary has been defined with the following self-explanatory parameters:
