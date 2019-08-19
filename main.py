@@ -131,11 +131,13 @@ if __name__ == '__main__':
     
   """
   
-  RUN_DEMO = True
-  RUN_TRAIN = False
+  RUN_DEMO = False
+  RUN_TRAIN = True
+  
   
   env = UnityEnvironment(file_name="Tennis_Windows_x86_64/Tennis.exe",
-                         seed=1234)
+                         seed=1234,
+                         no_graphics=True)
   # get the default brain
   brain_name = env.brain_names[0]
   brain = env.brains[brain_name]
@@ -185,13 +187,16 @@ if __name__ == '__main__':
       "OUNoise" : [False],          #, True],
 
 
-      "noise_scaling_min"         : [0.2, 0.5],
+      "noise_scaling_min"         : [0.2], #, 0.5],
       "LR_ACTOR"                  : [1e-4],
       "LR_CRITIC"                 : [2e-4],
+      "PER"           : ["PER1", "none", "sparsity", ],
+      "huber_loss"    : [True, False], 
       }
   
   _combs, _params = grid_dict_to_values(dct_grid)
   
+  TEST = 4
   
   if RUN_TRAIN:
     
@@ -204,16 +209,17 @@ if __name__ == '__main__':
     ### with active_session(): --- if you use Jupyter
     for trial in range(2):
       for i, _c in enumerate(_combs):
-        iteration_name = "MADDPG{}_T{}".format(i+1, trial+1)
         dct_pos = grid_pos_to_params(_c, _params)
-        if (
-            (dct_pos['apply_post_bn'] == True) and
-            (dct_pos['actor_input_bn'] == False) and
-            (dct_pos['actor_hidden_bn'] == False) and
-            (dct_pos['critic_state_bn'] == False) and
-            (dct_pos['critic_final_bn'] == False)
-           ):
-          continue
+
+        s_loss = 'huber' if dct_pos['huber_loss'] else 'mse'
+        s_per = dct_pos['PER']
+ 
+          
+        nnn = '{}_{}'.format(s_loss, s_per)
+        
+        iteration_name = "MADDPG{}_{}_T{}".format(
+            TEST, nnn, trial+1)
+
         reset_seed()
         print("\n\nTRIAL {} ITERATION {}/{}  {}".format(trial+1, i+1, len(_combs), dct_pos))
         if dct_pos['noise_scaling_factor'] == 1:

@@ -5,6 +5,22 @@ import torch as th
 import torch.nn as nn
 
 
+def model_summary(model, leading_spaces=2):
+  def count_non_space(s):
+    cc = [1 if x != ' ' else 0 for x in s]
+    return sum(cc)
+  lst_summary = "{}".format(model).split('\n')
+  lst_results = []
+  for line in lst_summary:
+    if line[-1] == '(':
+      line = line[:-1]
+    if count_non_space(line) <= 2:
+      continue
+    line = ' ' * leading_spaces + line + '\n'
+    lst_results.append(line)
+  lst_results[-1] = lst_results[-1][:-1]
+  txt_results = "".join(lst_results)
+  return txt_results  
 
 def hidden_init(layer):
   fan_in = layer.weight.data.size()[0]
@@ -74,6 +90,8 @@ class MADDPGActor(nn.Module):
     self.reset_parameters()
     return
       
+  def Summary(self, leading_spaces=2):
+    return model_summary(self, leading_spaces=leading_spaces)
       
   def reset_parameters(self):            
     init_layers(self.layers, self.init_custom)                    
@@ -224,6 +242,8 @@ class MADDPGCritic(nn.Module):
     x = self.final_linear(x)
     return x
 
+  def Summary(self, leading_spaces=2):
+    return model_summary(self, leading_spaces=leading_spaces)
 
     
 

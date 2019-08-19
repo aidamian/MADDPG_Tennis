@@ -11,10 +11,113 @@ import random
 
 from time import time
 
-_VER_ = '0.9.1'
+_VER_ = '0.9.6'
 
-class MASumTree(object):
+
+    
+class MAGenericReplayBuffer(object):
+  def __init__(self,  capacity, nr_agents, engine='torch', 
+               device=None, continuous=True, 
+               no_reward_value=0):
+    self.capacity = capacity
+    self.no_reward_value = 0
+    self.rewards_stats_per_agent = [[] for _ in range(nr_agents)]
+    self.nr_agents = nr_agents
+    self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
+    self.engine = engine
+    self.continuous = continuous
+    if engine == 'torch' and device is None:
+      raise ValueError("Must provide device if engine is torch")
+    self.device = device
+    self.episode = -1
+    self.debug_cpu_copy = []
+    self.cpu_start = 0
+    self.cpu_end = 0
+    self.__version__ = _VER_
+    print("GenericReplayBuffer init v{}".format(self.__version__))
+    return
+  
+
+  def start_cpu_copy(self):
+    self.cpu_start = time()
+  
+  def end_cpu_copy(self):
+    self.cpu_end = time()
+    self.debug_cpu_copy.append(self.cpu_end - self.cpu_start)
+    return
+  
+  def get_cpu_copy_time(self):
+    return np.sum(self.debug_cpu_copy)  
+  
+  
+  def get_reward_sparsity_per_agent(self, agent):
+    if len(self.rewards_stats_per_agent[agent]) > 0:
+      return np.mean(self.rewards_stats_per_agent[agent])
+    else:
+      return np.nan
+    
+  def get_reward_sparsity(self,):
+    v = 0 
+    for a in range(self.nr_agents):
+      v += self.get_reward_sparsity_per_agent(a)
+    v /= self.nr_agents
+    return v
+    
+  
+  def _prepare_experience_buffer(self, 
+                                 agent,
+                                 experience_buffer,
+                                 min_non_zero_prc=0,
+                                 ):
+    np_states = np.array([e.state for e in experience_buffer if e is not None])
+    np_actions = np.array([e.action for e in experience_buffer if e is not None])
+    np_rewards = np.array([e.reward for e in experience_buffer if e is not None])
+    # now analize the particular agent reward sparsity
+    nz_rew = (np_rewards[:,agent] != self.no_reward_value).sum()
+    nz_rew_prc = nz_rew / np_rewards.shape[0]
+    if nz_rew_prc < min_non_zero_prc:
+      return None
+    self.rewards_stats_per_agent[agent].append(nz_rew_prc)
+    np_next_states = np.array([e.next_state for e in experience_buffer if e is not None])
+    np_dones = np.array([e.done for e in experience_buffer if e is not None]).astype(np.uint8)
+    if self.engine == 'torch':
+      self.start_cpu_copy()
+      import torch as th
+      states = th.from_numpy(np_states).float().to(self.device)
+      if self.continuous:
+        actions = th.from_numpy(np_actions).float().to(self.device)
+      else:
+        actions = th.from_numpy(np_actions).long().to(self.device)
+      rewards = th.from_numpy(np_rewards).float().to(self.device)
+      next_states = th.from_numpy(np_next_states).float().to(self.device)
+      dones = th.from_numpy(np_dones).float().to(self.device)
+      self.end_cpu_copy()
+    else:
+      states = np_states
+      actions = np_actions
+      rewards = np_rewards
+      next_states = np_next_states
+      dones = np_dones
+    return (states, actions, rewards, next_states, dones)
+    
+  def add(self, states, actions, rewards, next_states, dones):
+    if len(rewards) != self.nr_agents:
+      raise ValueError("Rewards must be supplied for all agents!")
+    e = self.experience(states, actions, rewards, next_states, dones)
+    self.store(e)
+    return
+
+  def store(self, experience):
+    raise ValueError("Called abstract method!")
+    return
+
+
+
+class SumTree(object):
   """
+  TODO: Must transform to multi-agent !!!
+  
+  
   This SumTree code is modified version of Morvan Zhou: 
   https://github.com/MorvanZhou/Reinforcement-learning-with-tensorflow/blob/master/contents/5.2_Prioritized_Replay_DQN/RL_brain.py
   """
@@ -168,122 +271,11 @@ tree_index  0 0  0  We fill the leaves from left to right
       return self.tree[0] # Returns the root node
     
     
-class MAGenericReplayBuffer(object):
-  def __init__(self,  capacity, nr_agents, engine='torch', device=None, continuous=True):
-    self.capacity = capacity
-    self.nr_agents = nr_agents
-    self.experience = namedtuple("Experience", field_names=["state", "action", "reward", "next_state", "done"])
-    self.engine = engine
-    self.continuous = continuous
-    if engine == 'torch' and device is None:
-      raise ValueError("Must provide device if engine is torch")
-    self.device = device
-    self.episode = -1
-    self.debug_cpu_copy = []
-    self.cpu_start = 0
-    self.cpu_end = 0
-    self.__version__ = _VER_
-    print("Init GRB v.{}".format(self.__version__))
-    return
-  
-
-  def start_cpu_copy(self):
-    self.cpu_start = time()
-  
-  def end_cpu_copy(self):
-    self.cpu_end = time()
-    self.debug_cpu_copy.append(self.cpu_end - self.cpu_start)
-    return
-  
-  def get_cpu_copy_time(self):
-    return np.sum(self.debug_cpu_copy)  
-  
-  def __not_efficient__prepare_experience_buffer(self, all_agents_experience_buffer):
-    assert len(all_agents_experience_buffer[0]) == self.nr_agents, "Experience samples must have data for each agent"
-    output_buffers = []      
-    for i in range(self.nr_agents):
-      experience_buffer = [b[i] for b in all_agents_experience_buffer]   
-           
-      np_states = np.vstack([e.state for e in experience_buffer if e is not None])
-      np_actions = np.vstack([e.action for e in experience_buffer if e is not None])
-      np_rewards = np.vstack([e.reward for e in experience_buffer if e is not None])
-      np_next_states = np.vstack([e.next_state for e in experience_buffer if e is not None])
-      np_dones = np.vstack([e.done for e in experience_buffer if e is not None]).astype(np.uint8)
-      if self.engine == 'torch':
-        self.start_cpu_copy()
-        import torch as th
-        states = th.from_numpy(np_states).float().to(self.device)
-        if self.continuous:
-          actions = th.from_numpy(np_actions).float().to(self.device)
-        else:
-          actions = th.from_numpy(np_actions).long().to(self.device)
-        rewards = th.from_numpy(np_rewards).float().to(self.device)
-        next_states = th.from_numpy(np_next_states).float().to(self.device)
-        dones = th.from_numpy(np_dones).float().to(self.device)
-        self.end_cpu_copy()
-      else:
-        states = np_states
-        actions = np_actions
-        rewards = np_rewards
-        next_states = np_next_states
-        dones = np_dones
-      agent_buff = (states, actions, rewards, next_states, dones)
-      output_buffers.append(agent_buff)
-    return output_buffers
-  
-  
-  def _prepare_experience_buffer(self, experience_buffer):
-    np_states = np.array([e.state for e in experience_buffer if e is not None])
-    np_actions = np.array([e.action for e in experience_buffer if e is not None])
-    np_rewards = np.array([e.reward for e in experience_buffer if e is not None])
-    np_next_states = np.array([e.next_state for e in experience_buffer if e is not None])
-    np_dones = np.array([e.done for e in experience_buffer if e is not None]).astype(np.uint8)
-    if self.engine == 'torch':
-      self.start_cpu_copy()
-      import torch as th
-      states = th.from_numpy(np_states).float().to(self.device)
-      if self.continuous:
-        actions = th.from_numpy(np_actions).float().to(self.device)
-      else:
-        actions = th.from_numpy(np_actions).long().to(self.device)
-      rewards = th.from_numpy(np_rewards).float().to(self.device)
-      next_states = th.from_numpy(np_next_states).float().to(self.device)
-      dones = th.from_numpy(np_dones).float().to(self.device)
-      self.end_cpu_copy()
-    else:
-      states = np_states
-      actions = np_actions
-      rewards = np_rewards
-      next_states = np_next_states
-      dones = np_dones
-    return (states, actions, rewards, next_states, dones)
     
-      
-    
-  def __not_efficient_add(self, states, actions, rewards, next_states, dones):
-    """Add a new experience to memory."""
-    assert len(states.shape) == 2, "Observations must be (n_agents, obs_size)"
-    exp_buff = []
-    for i in range(self.nr_agents):      
-      e = self.experience(states[i], actions[i], rewards[i], next_states[i], dones[i])
-      exp_buff.append(e)
-    self.store(exp_buff)
-    return
-  
-  def add(self, states, actions, rewards, next_states, dones):
-    assert len(states.shape) == 2, "Observations must be (n_agents, obs_size)"
-    assert states.shape[0] == self.nr_agents, "Observations must be (n_agents, obs_size)"
-    e = self.experience(states, actions, rewards, next_states, dones)
-    self.store(e)
-    return
-
-  def store(self, experience):
-    raise ValueError("Called abstract method!")
-    return
-    
-    
-class MAPERMemory(MAGenericReplayBuffer):  # stored as ( s, a, r, s_ ) in SumTree
+class PERMemory(MAGenericReplayBuffer):  # stored as ( s, a, r, s_ ) in SumTree
   """
+  TODO: MUST TRANSFORM TO Multi-Agent!
+  
   This SumTree code is modified version and the original code is from:
   https://github.com/jaara/AI-blog/blob/master/Seaquest-DDQN-PER.py
   """
@@ -306,7 +298,7 @@ class MAPERMemory(MAGenericReplayBuffer):  # stored as ( s, a, r, s_ ) in SumTre
     self.PER_b_increment_per_sampling = 0.001
     
     self.absolute_error_upper = 1.  # clipped abs error
-    self.tree = MASumTree(self.capacity)
+    self.tree = SumTree(self.capacity)
     return
 
     
@@ -448,16 +440,17 @@ class MAPERMemory(MAGenericReplayBuffer):  # stored as ( s, a, r, s_ ) in SumTre
     return min(self.tree.stored_data, self.tree.capacity)
 
 
-class MANaivePrioritizedBuffer(MAGenericReplayBuffer):
+class MASimplePER(MAGenericReplayBuffer):
   def __init__(self, prob_alpha=0.6, beta_start=0.4, **kwargs):
-    raise ValueError("Not yet implemented")
     super().__init__(**kwargs)
     self.prob_alpha = prob_alpha
     self.buffer     = []
     self.pos        = 0
     self.beta       = beta_start
     self.beta_increment = 0.001
-    self.priorities = np.zeros((self.capacity,), dtype=np.float32)
+    self.priorities = np.zeros((self.nr_agents, self.capacity), dtype=np.float32) 
+    print("{} initialized.".format(self.__class__.__name__))
+                       
     
   def store(self, experience):    
     max_prio = self.priorities.max() if self.buffer else 1.0    
@@ -467,15 +460,15 @@ class MANaivePrioritizedBuffer(MAGenericReplayBuffer):
     else:
         self.buffer[self.pos] = experience
     
-    self.priorities[self.pos] = max_prio
+    self.priorities[:,self.pos] = max_prio
     self.pos = (self.pos + 1) % self.capacity
     return
   
-  def sample(self, batch_size):
+  def sample(self, agent, batch_size):
     if len(self.buffer) == self.capacity:
-        prios = self.priorities
+        prios = self.priorities[agent]
     else:
-        prios = self.priorities[:self.pos]
+        prios = self.priorities[agent, :self.pos]
     
     probs  = prios ** self.prob_alpha
     probs /= probs.sum()
@@ -490,7 +483,8 @@ class MANaivePrioritizedBuffer(MAGenericReplayBuffer):
     weights /= weights.max()
     weights  = np.array(weights, dtype=np.float32).reshape((-1,1))
     
-    (states, actions, rewards, next_states, dones) = self._prepare_experience_buffer(samples)
+    _res = self._prepare_experience_buffer(agent, samples)
+    (states, actions, rewards, next_states, dones) = _res
 
     if self.engine == 'torch':
       import torch as th
@@ -500,9 +494,9 @@ class MANaivePrioritizedBuffer(MAGenericReplayBuffer):
     
     return (states, actions, rewards, next_states, dones) , indices, out_IS_weights
   
-  def batch_update(self, batch_indices, batch_priorities):
+  def batch_update(self, agent, batch_indices, batch_priorities):
     for idx, prio in zip(batch_indices, batch_priorities):
-        self.priorities[idx] = np.minimum(prio + 1e-5, 1.)
+        self.priorities[agent, idx] = np.minimum(prio + 1e-5, 1.)
 
   def __len__(self):
     return len(self.buffer)
@@ -511,7 +505,8 @@ class MANaivePrioritizedBuffer(MAGenericReplayBuffer):
 class MASimpleReplayBuffer(MAGenericReplayBuffer):
   """Fixed-size buffer to store experience tuples."""
 
-  def __init__(self, seed=1234, **kwargs):
+  def __init__(self, min_non_zero_prc=0, seed=1234, 
+               **kwargs):
     """Initialize a ReplayBuffer object.
 
     Params
@@ -522,23 +517,50 @@ class MASimpleReplayBuffer(MAGenericReplayBuffer):
         seed (int): random seed
     """
     super().__init__(**kwargs)
-    self.memory = deque(maxlen=self.capacity)  
+    self.memory = deque(maxlen=self.capacity)
+    self.nz_rewards = [deque(maxlen=self.capacity) for _ in range(self.nr_agents)]
+    self.min_non_zero_prc = min_non_zero_prc
     self.seed = random.seed(seed)
+    print("{} initialized with {}".format(
+        self.__class__.__name__,
+        "rewards enforcement" if self.min_non_zero_prc > 0 else "no sparsity check"))
     return
   
   def store(self, experience):
+    NON_ZERO = 20
+    ZERO = 1
+    for a in range(self.nr_agents):
+      rew = experience.reward[a]
+      nz = rew != self.no_reward_value
+      self.nz_rewards[a].append(NON_ZERO if nz else ZERO)
     self.memory.append(experience)
-  
+    return
+    
 
-  def sample(self, n):
+  def sample(self, agent, n, min_non_zero_prc=None):
     """Randomly sample a batch of experiences from memory."""
-    experiences = random.sample(self.memory, k=n)
-    agents_buffers = self._prepare_experience_buffer(experiences)
+    if min_non_zero_prc is None:
+      min_non_zero_prc = self.min_non_zero_prc
+    agents_buffers = None
+    if min_non_zero_prc == 0:
+      probas = np.ones((len(self.memory),)) / len(self.memory)
+    else:
+      # we select probas for the current agent
+      probas = np.array(self.nz_rewards[agent]) / np.sum(self.nz_rewards[agent])
+    while agents_buffers is None:
+      # we select the good memories for the current agent
+      idxs = np.random.choice(len(self.memory), size=n, replace=False, p=probas)
+      experiences = [self.memory[x] for x in idxs]
+      agents_buffers = self._prepare_experience_buffer(agent,
+                                                       experiences, 
+                                                       min_non_zero_prc=min_non_zero_prc)
     return agents_buffers
 
   def __len__(self):
       """Return the current size of internal memory."""
       return len(self.memory)
+  
+        
       
 if __name__ == '__main__':
   ###

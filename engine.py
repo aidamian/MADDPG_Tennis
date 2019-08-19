@@ -8,10 +8,34 @@ import torch as th
 import numpy as np
 
 from agent import DDPGAgent
-from ma_per import MASimpleReplayBuffer
+from ma_per import MASimpleReplayBuffer, MASimplePER
 from brain import layers_stats
 
 from collections import deque
+
+def calc_huber_weighted(th_y_pred, th_y_true, d=1, th_weights=None):
+  th_res = th_y_pred - th_y_true
+  th_batch_loss1 = (th_res.abs()  <1).float() * (0.5 * (th_res**2))
+  th_batch_loss2 = (th_res.abs() >=1).float() * (d * th_res.abs() - 0.5 * d)
+  th_batch_loss = th_batch_loss1 + th_batch_loss2
+  if th_weights is not None:
+    th_weighted_batch_loss = th_weights * th_batch_loss 
+  else:
+    th_weighted_batch_loss = th_batch_loss
+  th_weighted_loss = th_weighted_batch_loss.mean()
+  return th_weighted_loss  
+
+def calc_huber_weighted_residual(th_res, d=1, th_weights=None):
+  th_batch_loss1 = (th_res.abs()  <1).float() * (0.5 * (th_res**2))
+  th_batch_loss2 = (th_res.abs() >=1).float() * (d * th_res.abs() - 0.5 * d)
+  th_batch_loss = th_batch_loss1 + th_batch_loss2
+  if th_weights is not None:
+    th_weighted_batch_loss = th_weights * th_batch_loss 
+  else:
+    th_weighted_batch_loss = th_batch_loss
+  th_weighted_loss = th_weighted_batch_loss.mean()
+  return th_weighted_loss  
+
 
 class MADDPGEngine():
   def __init__(self, action_size, state_size, n_agents, 
@@ -33,9 +57,12 @@ class MADDPGEngine():
                noise_scaling_min=0.2,
                LR_ACTOR=1e-4,
                LR_CRITIC=2e-4,
+               huber_loss=False,
                DEBUG=False,
                OUNoise=True,
                activation='relu',
+               PER=None,
+               min_non_zero_prc=0.35,
                name='MADDPG',
                dev=None):
     self.__name__ = name
@@ -51,11 +78,33 @@ class MADDPGEngine():
     if dev is None:
       dev = th.device("cuda:0" if th.cuda.is_available() else "cpu")
     self.dev = dev
-
-    self.memory = MASimpleReplayBuffer(capacity=MEMORY_SIZE, 
-                                       nr_agents=self.n_agents,
-                                       engine='torch', 
-                                       device=self.dev)
+    self.huber_loss = huber_loss
+    
+    if PER == 'none':
+      self.min_non_zero_prc = 0
+      self.PER = False
+      self.memory = MASimpleReplayBuffer(capacity=MEMORY_SIZE, 
+                                         nr_agents=self.n_agents,
+                                         engine='torch', 
+                                         device=self.dev,
+                                         min_non_zero_prc=0)
+    elif PER == "sparsity":
+      self.min_non_zero_prc = min_non_zero_prc
+      self.PER = False
+      self.memory = MASimpleReplayBuffer(capacity=MEMORY_SIZE, 
+                                         nr_agents=self.n_agents,
+                                         engine='torch', 
+                                         device=self.dev,
+                                         min_non_zero_prc=min_non_zero_prc)
+    elif PER == 'PER1':
+      self.PER = True
+      self.memory = MASimplePER(capacity=MEMORY_SIZE, 
+                                nr_agents=self.n_agents,
+                                engine='torch', 
+                                device=self.dev,
+                                )
+    else:
+      raise ValueError("Unknown PER parameter value '{}'".format(PER))
 
     self.agents = []
     for i in range(n_agents):
@@ -87,6 +136,7 @@ class MADDPGEngine():
     self.noise_scaling_min = noise_scaling_min
     return
   
+    
   
   def act(self, states, add_noise):
     actions = np.zeros((self.n_agents, self.action_size))
@@ -143,8 +193,13 @@ class MADDPGEngine():
     ### get n_samples from memory
     ### the following lines of code are based on non-vectorized approaches for readability
     ### and educational purpose
-    
-    samples = self.memory.sample(n_samples)
+    if self.PER:
+      # PER_weights are the Importance Sampling weights (inverse to the importance)
+      samples, PER_indices, PER_weights = self.memory.sample(agent=agent_no, 
+                                                             batch_size=n_samples)
+    else:
+      samples = self.memory.sample(agent=agent_no, n=n_samples)
+
     _states, _actions, _rewards, _next_states, _dones = samples
     # prpare tensors for each agent
     all_exp = [x.transpose(0,1) for x in samples]
@@ -203,19 +258,38 @@ class MADDPGEngine():
     # now we train the agent critic
     
     th_q_value = curr_agent.critic(state=th_all_states, action=th_all_actions)
-    loss_fn = th.nn.SmoothL1Loss()
-    
+        
     curr_agent.critic_optimizer.zero_grad()
-    th_critic_loss = loss_fn(th_q_value, th_y)
-    th_critic_loss = th_critic_loss.mean()
+    
+    if self.PER:
+      th_qfunc_residual = th_y - th_q_value
+      np_errors = th.abs(th_qfunc_residual).cpu().detach().numpy()
+      self.memory.batch_update(agent=agent_no, 
+                               batch_indices=PER_indices, 
+                               batch_priorities=np_errors)      
+      if self.huber_loss:
+        th_critic_loss = calc_huber_weighted_residual(th_res=th_qfunc_residual,
+                                                      th_weights=PER_weights)
+      else:
+        th_critic_loss = th_qfunc_residual.pow(2)
+        if PER_weights is not None:
+          th_critic_loss *= PER_weights
+        th_critic_loss = th_critic_loss.mean()    
+    else:      
+      if self.huber_loss:
+        loss_fn = th.nn.SmoothL1Loss()
+      else:
+        loss_fn = th.nn.MSELoss()
+      th_critic_loss = loss_fn(th_q_value, th_y)
+      th_critic_loss = th_critic_loss.mean()
+      
     th_critic_loss.backward()
     if self.DEBUG:
       if layers_stats(curr_agent.critic):
         print(self.current_episode)
     th.nn.utils.clip_grad_norm_(curr_agent.critic.parameters(), 1)
     curr_agent.critic_optimizer.step()
-    curr_agent.critic_optimizer.zero_grad()
-    
+    curr_agent.critic_optimizer.zero_grad()  
     
     # now we prepare the input for actor optimization
     actors_actions = []
@@ -226,6 +300,8 @@ class MADDPGEngine():
         th_actions = th_actions.detach()
       actors_actions.append(th_actions)
     th_actors_actions = th.cat(actors_actions, dim=1)
+    
+    
     
     curr_agent.actor_optimizer.zero_grad()
     th_actor_loss = -curr_agent.critic(state=th_all_states, action=th_actors_actions)
@@ -263,10 +339,7 @@ class MADDPGEngine():
   def add_exp(self, states, actions, rewards, next_states, dones):
     self.memory.add(states, actions, rewards, next_states, dones)
     return
-      
-    
-    
-      
+            
     
   def run_on_unity(self, env, brain_name, n_episodes=1000,
               n_ep_per_update=1, n_update_per_ep=3, time_steps_per_episode=10000,
@@ -277,7 +350,7 @@ class MADDPGEngine():
     all_avg_scores = []
     all_avg_steps = []
     solved = 0
-    print("Running MADDPG main training loop with:")
+    print("Unity run stats for MADDPG main training loop:")
     print("  Updates post episode:  {:.1f}".format(n_update_per_ep/n_ep_per_update))
     print("  Updates per step:      {}".format(n_update_per_step))
     print("  Max steps per episode: {}".format(time_steps_per_episode))
@@ -313,19 +386,23 @@ class MADDPGEngine():
       status_score = np.mean(last_scores)
       status_steps = np.mean(last_steps)
       max_last_100 = np.max(last_scores)
-      max_all = np.max(all_scores)
+      #max_all = np.max(all_scores)
       all_avg_scores.append(status_score)
       all_avg_steps.append(status_steps)
+      nz_rew_prc = self.memory.get_reward_sparsity()
       if (n_ep_per_update >0) and ((i_episode % n_ep_per_update) == 0):
         for upd in range(n_update_per_ep):
           self.train()
-      print("\rEpisode {:>4} score: {:5.3f},  avg:{:5.3f},  nsf:{:4.2f}  steps:{:>3}    ".format(
-          i_episode, last_score, status_score, self.noise_scaling_factor, ts), end='', flush=True)
+      print("\rEp {:>4}  sc:{:5.3f},  avg:{:5.3f},  nsf:{:4.2f},  steps:{:>3},  nzr:{:4.1f}%    ".format(
+          i_episode, last_score, status_score,
+          self.noise_scaling_factor, ts, 
+          nz_rew_prc * 100), end='', flush=True)
       if (i_episode > 0) and (i_episode % 100) == 0:
-        print("\rEpisode {:>4} score:{:5.3f}  avg:{:5.3f}  max100:{:5.3f}  max:{:5.2f}  buff:{:>7}/{}  upd:{:>6}  nsf:{:4.2f}  avg_stp:{:>5.1f}".format(
-            i_episode, last_score, status_score, max_last_100, max_all,
+        print("\rEp {:>4} sc:{:5.3f}  avg:{:5.3f}  max100:{:5.3f}  buff:{:>7}/{}  upd:{:>6}  nsf:{:4.2f}  avg_stp:{:>5.1f}  nzr:{:4.1f}%".format(
+            i_episode, last_score, status_score, max_last_100,
             len(self.memory), self.memory.capacity, self.n_updates,
-            self.noise_scaling_factor, status_steps), flush=True)
+            self.noise_scaling_factor, status_steps,  
+            nz_rew_prc * 100), flush=True)
       if (status_score >= 0.5) and (solved == 0):
         print("\nEnvironment solved in {} episodes!".format(i_episode+1))  
         self.save()

@@ -122,7 +122,7 @@ class DDPGAgent():
   
   def show_architecture(self):
     print("Agent '{}' initialized with:\nActor:\n{}\nCritic:\n{}\n  Noise: {}".format(
-        self.name, self.actor, self.critic,
+        self.name, self.actor.Summary(), self.critic.Summary(),
         "OU-noise" if self.OUnoise else "Gaussian noise"))
     print("  Actor LR:  {}".format(self.actor_optimizer.state_dict()['param_groups'][0]['lr']))
     print("  Critic LR: {}".format(self.critic_optimizer.state_dict()['param_groups'][0]['lr']))
